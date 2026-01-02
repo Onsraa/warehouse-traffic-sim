@@ -9,7 +9,7 @@ impl Plugin for WarehousePlugins {
         app.init_resource::<WarehouseGrid>()
             .insert_resource(ClearColor(Color::WHITE))
             .add_systems(Startup, (setup_camera, setup_scene))
-            .add_systems(Update, draw_grid);
+            .add_systems(Update, (draw_grid, camera_controls));
     }
 }
 
@@ -68,5 +68,40 @@ fn draw_grid(mut gizmos: Gizmos) {
     for i in 0..=GRID_HEIGHT {
         let z = i as f32 * CELL_SIZE;
         gizmos.line(Vec3::new(0.0, y, z), Vec3::new(w, y, z), color);
+    }
+}
+
+fn camera_controls(
+    keyboard: Res<ButtonInput<KeyCode>>,
+    mut camera: Query<&mut Transform, With<Camera3d>>,
+    time: Res<Time>,
+) {
+    let Ok(mut transform) = camera.single_mut() else {
+        return;
+    };
+
+    let speed = 30.0 * time.delta_secs();
+
+    let forward = transform.forward().with_y(0.0).normalize_or_zero();
+    let right = transform.right().with_y(0.0).normalize_or_zero();
+
+    if keyboard.pressed(KeyCode::KeyW) {
+        transform.translation += forward * speed;
+    }
+    if keyboard.pressed(KeyCode::KeyS) {
+        transform.translation -= forward * speed;
+    }
+    if keyboard.pressed(KeyCode::KeyA) {
+        transform.translation -= right * speed;
+    }
+    if keyboard.pressed(KeyCode::KeyD) {
+        transform.translation += right * speed;
+    }
+
+    if keyboard.pressed(KeyCode::KeyQ) {
+        transform.translation.y += speed;
+    }
+    if keyboard.pressed(KeyCode::KeyE) {
+        transform.translation.y -= speed;
     }
 }
