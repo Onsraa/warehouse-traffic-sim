@@ -1,15 +1,26 @@
-use crate::constants::{CELL_SIZE, GRID_HEIGHT, GRID_WIDTH};
-use crate::core::WarehouseGrid;
 use bevy::prelude::*;
+
+use crate::constants::{CELL_SIZE, GRID_HEIGHT, GRID_WIDTH, SPAWN_ZONE_WIDTH, CARGO_ZONE_WIDTH};
+use crate::core::{WarehouseGrid, WarehouseZones};
+use crate::plugins::navigation::NavigationPlugin;
+use crate::systems::visualization::{draw_robot_paths, robot_color_system};
 
 pub struct WarehousePlugins;
 
 impl Plugin for WarehousePlugins {
     fn build(&self, app: &mut App) {
         app.init_resource::<WarehouseGrid>()
+            .init_resource::<WarehouseZones>()
             .insert_resource(ClearColor(Color::WHITE))
+            .add_plugins(NavigationPlugin)
             .add_systems(Startup, (setup_camera, setup_scene))
-            .add_systems(Update, (draw_grid, camera_controls));
+            .add_systems(Update, (
+                draw_grid,
+                draw_zones,
+                draw_robot_paths,
+                robot_color_system,
+                camera_controls,
+            ));
     }
 }
 
@@ -22,7 +33,7 @@ fn setup_camera(mut commands: Commands) {
 
     commands.spawn((
         Camera3d::default(),
-        Transform::from_xyz(grid_center.x, 70.0, grid_center.z + 50.0)
+        Transform::from_xyz(grid_center.x, 80.0, grid_center.z + 60.0)
             .looking_at(grid_center, Vec3::Y),
     ));
 }
@@ -46,7 +57,7 @@ fn setup_scene(
     commands.spawn((
         Mesh3d(meshes.add(Plane3d::new(Vec3::Y, floor_size * 0.5))),
         MeshMaterial3d(materials.add(StandardMaterial {
-            base_color: Color::srgb(0.98, 0.98, 0.98),
+            base_color: Color::srgb(0.95, 0.95, 0.95),
             unlit: true,
             ..default()
         })),
@@ -55,7 +66,7 @@ fn setup_scene(
 }
 
 fn draw_grid(mut gizmos: Gizmos) {
-    let color = Color::srgba(0.7, 0.7, 0.7, 0.5);
+    let color = Color::srgba(0.8, 0.8, 0.8, 0.3);
     let w = GRID_WIDTH as f32 * CELL_SIZE;
     let h = GRID_HEIGHT as f32 * CELL_SIZE;
     let y = 0.01;
@@ -68,6 +79,43 @@ fn draw_grid(mut gizmos: Gizmos) {
     for i in 0..=GRID_HEIGHT {
         let z = i as f32 * CELL_SIZE;
         gizmos.line(Vec3::new(0.0, y, z), Vec3::new(w, y, z), color);
+    }
+}
+
+fn draw_zones(mut gizmos: Gizmos, zones: Res<WarehouseZones>) {
+    let y = 0.02;
+
+    // Spawns en bleu
+    for &pos in &zones.spawn_points {
+        let x = pos.x as f32 * CELL_SIZE + CELL_SIZE * 0.5;
+        let z = pos.y as f32 * CELL_SIZE + CELL_SIZE * 0.5;
+        gizmos.rect(
+            Isometry3d::new(Vec3::new(x, y, z), Quat::from_rotation_x(-std::f32::consts::FRAC_PI_2)),
+            Vec2::splat(CELL_SIZE * 0.8),
+            Color::srgba(0.2, 0.4, 0.8, 0.3),
+        );
+    }
+
+    // Storage en jaune
+    for &pos in &zones.storage_cells {
+        let x = pos.x as f32 * CELL_SIZE + CELL_SIZE * 0.5;
+        let z = pos.y as f32 * CELL_SIZE + CELL_SIZE * 0.5;
+        gizmos.rect(
+            Isometry3d::new(Vec3::new(x, y, z), Quat::from_rotation_x(-std::f32::consts::FRAC_PI_2)),
+            Vec2::splat(CELL_SIZE * 0.8),
+            Color::srgba(0.8, 0.7, 0.1, 0.3),
+        );
+    }
+
+    // Cargo en rouge
+    for &pos in &zones.cargo_cells {
+        let x = pos.x as f32 * CELL_SIZE + CELL_SIZE * 0.5;
+        let z = pos.y as f32 * CELL_SIZE + CELL_SIZE * 0.5;
+        gizmos.rect(
+            Isometry3d::new(Vec3::new(x, y, z), Quat::from_rotation_x(-std::f32::consts::FRAC_PI_2)),
+            Vec2::splat(CELL_SIZE * 0.8),
+            Color::srgba(0.9, 0.3, 0.2, 0.4),
+        );
     }
 }
 
@@ -97,7 +145,6 @@ fn camera_controls(
     if keyboard.pressed(KeyCode::KeyD) {
         transform.translation += right * speed;
     }
-
     if keyboard.pressed(KeyCode::KeyQ) {
         transform.translation.y += speed;
     }
