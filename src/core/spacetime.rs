@@ -2,7 +2,6 @@ use bevy::prelude::*;
 use rustc_hash::FxHashMap;
 use super::GridPos;
 
-/// Clé espace-temps: position + tick
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct SpaceTimeKey {
     pub pos: GridPos,
@@ -16,7 +15,6 @@ impl SpaceTimeKey {
     }
 }
 
-/// Table de réservations espace-temps
 #[derive(Resource, Default)]
 pub struct SpaceTimeTable {
     reservations: FxHashMap<SpaceTimeKey, Entity>,
@@ -24,19 +22,19 @@ pub struct SpaceTimeTable {
 }
 
 impl SpaceTimeTable {
-    /// Réserve une cellule pour un tick donné
     pub fn reserve(&mut self, pos: GridPos, tick: u64, entity: Entity) -> bool {
         let key = SpaceTimeKey::new(pos, tick);
-        if self.reservations.contains_key(&key) {
-            return false;
+        if let Some(&existing) = self.reservations.get(&key) {
+            if existing != entity {
+                return false;
+            }
         }
         self.reservations.insert(key, entity);
         true
     }
 
-    /// Réserve un chemin complet (séquence de positions)
     pub fn reserve_path(&mut self, path: &[(GridPos, u64)], entity: Entity) -> bool {
-        // Vérifie d'abord que tout est libre
+        // Vérifie d'abord
         for &(pos, tick) in path {
             let key = SpaceTimeKey::new(pos, tick);
             if let Some(&occupant) = self.reservations.get(&key) {
@@ -52,7 +50,6 @@ impl SpaceTimeTable {
         true
     }
 
-    /// Vérifie si une cellule est libre à un tick donné
     #[inline]
     pub fn is_free(&self, pos: GridPos, tick: u64, exclude: Option<Entity>) -> bool {
         match self.reservations.get(&SpaceTimeKey::new(pos, tick)) {
@@ -61,33 +58,38 @@ impl SpaceTimeTable {
         }
     }
 
-    /// Vérifie l'absence de conflit d'arête (swap conflict)
     pub fn is_edge_free(&self, from: GridPos, to: GridPos, tick: u64, exclude: Option<Entity>) -> bool {
-        // Vérifie que personne ne fait le mouvement inverse au même moment
-        let key_from = SpaceTimeKey::new(to, tick);
-        let key_to = SpaceTimeKey::new(from, tick + 1);
+        // Vérifie qu'aucun robot ne fait le mouvement inverse (swap)
+        let key_to_at_tick = SpaceTimeKey::new(to, tick);
+        let key_from_at_next = SpaceTimeKey::new(from, tick + 1);
 
-        let from_ok = match self.reservations.get(&key_from) {
-            None => true,
-            Some(&e) => exclude.is_some_and(|ex| ex == e),
+        let check = |key: SpaceTimeKey| -> bool {
+            match self.reservations.get(&key) {
+                None => true,
+                Some(&e) => exclude.is_some_and(|ex| ex == e),
+            }
         };
 
-        let to_ok = match self.reservations.get(&key_to) {
-            None => true,
-            Some(&e) => exclude.is_some_and(|ex| ex == e),
-        };
-
-        from_ok && to_ok
+        check(key_to_at_tick) && check(key_from_at_next)
     }
 
-    /// Libère toutes les réservations d'une entité
     pub fn clear_entity(&mut self, entity: Entity) {
         self.reservations.retain(|_, &mut e| e != entity);
     }
 
-    /// Nettoie les réservations expirées
+    /// Efface les réservations d'une entité sauf sa position actuelle
+    pub fn clear_entity_except_pos(&mut self, entity: Entity, current_pos: GridPos, current_tick: u64) {
+        self.reservations.retain(|key, &mut e| {
+            if e != entity {
+                return true;
+            }
+            // Garde les réservations de la position actuelle pour les prochains ticks
+            key.pos == current_pos && key.tick >= current_tick && key.tick < current_tick + 3
+        });
+    }
+
     pub fn cleanup(&mut self, current_tick: u64) {
-        self.reservations.retain(|key, _| key.tick >= current_tick);
+        self.reservations.retain(|key, _| key.tick >= current_tick.saturating_sub(1));
         self.current_tick = current_tick;
     }
 

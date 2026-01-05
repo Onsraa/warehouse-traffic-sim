@@ -43,9 +43,9 @@ impl Direction {
         match self {
             Self::North => (0, 1),
             Self::South => (0, -1),
-            Self::East  => (1, 0),
-            Self::West  => (-1, 0),
-            Self::None  => (0, 0),
+            Self::East => (1, 0),
+            Self::West => (-1, 0),
+            Self::None => (0, 0),
         }
     }
 
@@ -54,9 +54,9 @@ impl Direction {
         match self {
             Self::North => Self::South,
             Self::South => Self::North,
-            Self::East  => Self::West,
-            Self::West  => Self::East,
-            Self::None  => Self::None,
+            Self::East => Self::West,
+            Self::West => Self::East,
+            Self::None => Self::None,
         }
     }
 }

@@ -44,10 +44,7 @@ impl Eq for SpaceTimeNode {}
 
 impl Ord for SpaceTimeNode {
     fn cmp(&self, other: &Self) -> Ordering {
-        other
-            .f_cost
-            .partial_cmp(&self.f_cost)
-            .unwrap_or(Ordering::Equal)
+        other.f_cost.partial_cmp(&self.f_cost).unwrap_or(Ordering::Equal)
     }
 }
 
@@ -57,7 +54,7 @@ impl PartialOrd for SpaceTimeNode {
     }
 }
 
-/// Set des positions occupées par des robots statiques
+/// Positions occupées par des robots qui ne bougent pas
 #[derive(Default)]
 pub struct StaticObstacles {
     positions: FxHashMap<GridPos, Entity>,
@@ -88,13 +85,7 @@ impl<'a> PbsPlanner<'a> {
         static_obstacles: &'a StaticObstacles,
         config: &'a PbsConfig,
     ) -> Self {
-        Self {
-            grid,
-            highways,
-            space_time,
-            static_obstacles,
-            config,
-        }
+        Self { grid, highways, space_time, static_obstacles, config }
     }
 
     pub fn plan_path(
@@ -106,6 +97,11 @@ impl<'a> PbsPlanner<'a> {
     ) -> Option<Vec<(GridPos, u64)>> {
         if start == goal {
             return Some(vec![(start, start_tick)]);
+        }
+
+        // Si le goal est bloqué par un obstacle statique, pas de chemin possible
+        if self.static_obstacles.is_blocked(goal, Some(entity)) {
+            return None;
         }
 
         let horizon_end = start_tick + self.config.horizon;
@@ -122,13 +118,12 @@ impl<'a> PbsPlanner<'a> {
         });
 
         let mut iterations = 0;
-        let max_iterations = 10000;
+        let max_iterations = 15000;
         let mut best_node: Option<SpaceTimeNode> = None;
 
         while let Some(current) = open.pop() {
             iterations += 1;
             if iterations > max_iterations {
-                warn!("PBS: max iterations reached for {:?}", entity);
                 break;
             }
 
@@ -136,7 +131,6 @@ impl<'a> PbsPlanner<'a> {
                 return Some(self.reconstruct_path(&closed, current));
             }
 
-            // Garde le meilleur nœud trouvé
             if best_node.as_ref().map_or(true, |b| {
                 current.pos.manhattan_distance(&goal) < b.pos.manhattan_distance(&goal)
             }) {
@@ -155,25 +149,20 @@ impl<'a> PbsPlanner<'a> {
 
             let next_tick = current.tick + 1;
 
-            // Attendre
+            // Option: Attendre sur place
             if self.is_valid_wait(&current.pos, next_tick, entity) {
                 self.try_add_neighbor(
-                    &mut open,
-                    &closed,
-                    current.pos,
-                    next_tick,
-                    current.g_cost + 0.5,
-                    goal,
-                    current.pos,
-                    current.tick,
+                    &mut open, &closed, current.pos, next_tick,
+                    current.g_cost + 0.5, goal, current.pos, current.tick,
                 );
             }
 
-            // Se déplacer
+            // Option: Se déplacer
             for neighbor in self.highways.legal_neighbors(current.pos) {
                 if !self.grid.is_passable(neighbor) {
                     continue;
                 }
+                // Vérifie obstacles statiques (robots arrêtés)
                 if self.static_obstacles.is_blocked(neighbor, Some(entity)) {
                     continue;
                 }
@@ -182,31 +171,13 @@ impl<'a> PbsPlanner<'a> {
                 }
 
                 self.try_add_neighbor(
-                    &mut open,
-                    &closed,
-                    neighbor,
-                    next_tick,
-                    current.g_cost + 1.0,
-                    goal,
-                    current.pos,
-                    current.tick,
+                    &mut open, &closed, neighbor, next_tick,
+                    current.g_cost + 1.0, goal, current.pos, current.tick,
                 );
             }
         }
 
-        // Retourne le meilleur chemin partiel trouvé
-        if let Some(node) = best_node {
-            let path = self.reconstruct_path(&closed, node);
-            if path.len() > 1 {
-                return Some(path);
-            }
-        }
-
-        warn!(
-            "PBS: no path found for {:?} from {:?} to {:?}",
-            entity, start, goal
-        );
-        None
+        best_node.map(|node| self.reconstruct_path(&closed, node))
     }
 
     fn is_valid_wait(&self, pos: &GridPos, to_tick: u64, entity: Entity) -> bool {
@@ -221,11 +192,12 @@ impl<'a> PbsPlanner<'a> {
         to_tick: u64,
         entity: Entity,
     ) -> bool {
+        // Destination libre au tick d'arrivée
         if !self.space_time.is_free(*to, to_tick, Some(entity)) {
             return false;
         }
-        self.space_time
-            .is_edge_free(*from, *to, from_tick, Some(entity))
+        // Pas de swap (deux robots qui échangent leurs positions)
+        self.space_time.is_edge_free(*from, *to, from_tick, Some(entity))
     }
 
     fn try_add_neighbor(
@@ -279,16 +251,8 @@ impl<'a> PbsPlanner<'a> {
 /// Système de planification PBS
 pub fn pbs_planning_system(
     mut robots: Query<
-        (
-            Entity,
-            &GridPosition,
-            &Destination,
-            &Priority,
-            &Loaded,
-            &State,
-            &mut PlannedPath,
-        ),
-        With<Robot>,
+    (Entity, &GridPosition, &Destination, &Priority, &Loaded, &State, &mut PlannedPath),
+    With<Robot>,
     >,
     grid: Res<WarehouseGrid>,
     highways: Res<HighwayGraph>,
@@ -301,15 +265,19 @@ pub fn pbs_planning_system(
         return;
     }
 
-    // Construit la liste des obstacles statiques (robots Idle ou AtStation)
+    // TOUS les robots stationnaires sont des obstacles (pas seulement Idle)
     let mut static_obstacles = StaticObstacles::default();
     for (entity, grid_pos, _, _, _, state, _) in &robots {
-        if matches!(state.0, RobotState::Idle) {
+        let is_stationary = matches!(
+            state.0,
+            RobotState::Idle | RobotState::Loading | RobotState::Unloading | RobotState::Charging
+        );
+        if is_stationary {
             static_obstacles.positions.insert(grid_pos.0, entity);
         }
     }
 
-    // Trie par priorité
+    // Trie par priorité (plus bas = plus prioritaire)
     let mut sorted_robots: Vec<_> = robots.iter_mut().collect();
     sorted_robots.sort_by_key(|(_, _, _, prio, loaded, _, _)| {
         let load_bonus = if loaded.0 { 0u8 } else { 50 };
@@ -318,23 +286,37 @@ pub fn pbs_planning_system(
 
     space_time.cleanup(current_tick);
 
-    // Réserve d'abord les positions des robots statiques pour tous les ticks de l'horizon
+    // D'abord, réserve les positions de TOUS les robots pour éviter les collisions
+    for (entity, pos, _, _, _, _, _) in &sorted_robots {
+        // Réserve la position actuelle pour quelques ticks (sécurité)
+        for tick in current_tick..current_tick + 5 {
+            space_time.reserve(pos.0, tick, *entity);
+        }
+    }
+
+    // Réserve les positions des robots stationnaires pour tout l'horizon
     for (entity, pos, _, _, _, state, _) in &sorted_robots {
-        if matches!(state.0, RobotState::Idle) {
+        let is_stationary = matches!(
+            state.0,
+            RobotState::Idle | RobotState::Loading | RobotState::Unloading | RobotState::Charging
+        );
+        if is_stationary {
             for tick in current_tick..current_tick + config.horizon {
                 space_time.reserve(pos.0, tick, *entity);
             }
         }
     }
 
-    // Planifie les robots mobiles
+    // Planifie les robots mobiles uniquement
     for (entity, grid_pos, dest, _, _, state, mut path) in sorted_robots {
-        // Skip les robots statiques
-        if matches!(state.0, RobotState::Idle) {
+        // Skip robots stationnaires
+        if !matches!(state.0, RobotState::Moving) {
+            path.clear();
             continue;
         }
 
-        space_time.clear_entity(entity);
+        // Efface les anciennes réservations de ce robot (sauf position actuelle)
+        space_time.clear_entity_except_pos(entity, grid_pos.0, current_tick);
 
         let planner = PbsPlanner::new(&grid, &highways, &space_time, &static_obstacles, &config);
 
@@ -342,7 +324,6 @@ pub fn pbs_planning_system(
             space_time.reserve_path(&new_path, entity);
             *path = PlannedPath::new(new_path);
         }
-        // Si None: le robot reste figé avec son chemin actuel (ou vide)
     }
 }
 

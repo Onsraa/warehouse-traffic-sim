@@ -22,7 +22,7 @@ impl Plugin for NavigationPlugin {
                 (
                     simulation_tick_system,
                     sequential_spawn_system,
-                    mission_progression_system,  
+                    mission_progression_system,
                     update_priorities_system,
                     pbs_planning_system,
                     path_execution_system,

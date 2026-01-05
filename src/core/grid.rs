@@ -81,4 +81,15 @@ impl WarehouseGrid {
             pos.y as f32 * CELL_SIZE + CELL_SIZE * 0.5,
         )
     }
+
+    /// Marque les racks comme non-passables
+    pub fn apply_racks(&mut self, racks: &[super::zones::Rack]) {
+        for rack in racks {
+            for x in rack.start.x..=rack.end.x {
+                for y in rack.start.y..=rack.end.y {
+                    self.set(GridPos::new(x, y), CellType::Rack);
+                }
+            }
+        }
+    }
 }

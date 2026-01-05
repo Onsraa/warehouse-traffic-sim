@@ -1,5 +1,5 @@
-use bevy::prelude::*;
 use crate::core::GridPos;
+use bevy::prelude::*;
 
 /// État opérationnel du robot
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -17,7 +17,7 @@ impl RobotState {
     /// Priorité de base selon l'état (plus haut = plus prioritaire)
     pub fn base_priority(&self) -> u8 {
         match self {
-            Self::Fault => 0,      
+            Self::Fault => 0,
             Self::Loading | Self::Unloading => 10,
             Self::Moving => 20,
             Self::Idle => 30,
@@ -70,7 +70,10 @@ pub struct PlannedPath {
 
 impl PlannedPath {
     pub fn new(waypoints: Vec<(GridPos, u64)>) -> Self {
-        Self { waypoints, current_index: 0 }
+        Self {
+            waypoints,
+            current_index: 0,
+        }
     }
 
     pub fn clear(&mut self) {

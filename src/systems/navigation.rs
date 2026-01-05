@@ -7,10 +7,7 @@ use crate::constants::{ROBOT_ACCELERATION, ROBOT_DECELERATION, ROBOT_MAX_VELOCIT
 use crate::core::{SpaceTimeTable, WarehouseGrid};
 
 pub fn path_execution_system(
-    mut robots: Query<
-    (&mut GridPosition, &mut PlannedPath, &Mission, &mut Velocity),
-    With<Robot>,
-    >,
+    mut robots: Query<(&mut GridPosition, &mut PlannedPath, &Mission, &mut Velocity), With<Robot>>,
     space_time: Res<SpaceTimeTable>,
 ) {
     let current_tick = space_time.current_tick();

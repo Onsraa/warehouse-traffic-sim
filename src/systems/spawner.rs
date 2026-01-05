@@ -1,7 +1,10 @@
 use bevy::prelude::*;
 
-use crate::components::{Destination, GridPosition, Loaded, Mission, MissionPhase, Robot, RobotState, State};
-use crate::constants::ROBOT_COUNT;
+use crate::components::{
+    ActionTimer, Destination, GridPosition, Loaded, Mission, MissionPhase,
+    Robot, RobotState, State,
+};
+use crate::constants::{DROPOFF_DURATION, PICKUP_DURATION, ROBOT_COUNT};
 use crate::core::{SpaceTimeTable, WarehouseGrid, WarehouseZones};
 
 #[derive(Resource)]
@@ -17,7 +20,7 @@ impl Default for SpawnQueue {
         Self {
             total: ROBOT_COUNT,
             spawned_count: 0,
-            cooldown_ticks: 15,
+            cooldown_ticks: 20,
             last_spawn_tick: 0,
         }
     }
@@ -55,14 +58,20 @@ pub fn sequential_spawn_system(
         return;
     }
 
-    let storage_target = zones.next_storage();
-    let cargo_target = zones.next_cargo();
+    // Réserve storage et cargo - skip si aucun disponible
+    let Some(storage_target) = zones.reserve_storage() else {
+        return;
+    };
+    let Some(cargo_target) = zones.reserve_cargo() else {
+        zones.release_storage(storage_target);
+        return;
+    };
 
     let (wx, wz) = grid.grid_to_world(spawn_pos);
 
     let mesh = meshes.add(Cuboid::new(0.6, 0.4, 0.6));
     let material = materials.add(StandardMaterial {
-        base_color: Color::srgb(0.2, 0.6, 0.2), // Vert = non chargé
+        base_color: Color::srgb(0.2, 0.6, 0.2),
         ..default()
     });
 
@@ -83,40 +92,86 @@ pub fn sequential_spawn_system(
 }
 
 pub fn mission_progression_system(
+    mut commands: Commands,
     mut robots: Query<(
+        Entity,
         &GridPosition,
         &mut Mission,
         &mut Destination,
         &mut State,
         &mut Loaded,
+        Option<&mut ActionTimer>,
     ), With<Robot>>,
     mut zones: ResMut<WarehouseZones>,
+    time: Res<Time>,
 ) {
-    for (pos, mut mission, mut dest, mut state, mut loaded) in &mut robots {
+    for (entity, pos, mut mission, mut dest, mut state, mut loaded, timer) in &mut robots {
         match mission.phase {
             MissionPhase::GoingToStorage => {
                 if pos.0 == mission.storage_target {
-                    // Arrivé au storage → charge l'objet → va au cargo
-                    loaded.0 = true;
-                    mission.phase = MissionPhase::GoingToCargo;
-                    dest.0 = mission.cargo_target;
-                    state.0 = RobotState::Moving;
+                    mission.phase = MissionPhase::PickingUp;
+                    state.0 = RobotState::Loading;
+                    commands.entity(entity).insert(ActionTimer::new(PICKUP_DURATION));
+                }
+            }
+            MissionPhase::PickingUp => {
+                if let Some(mut t) = timer {
+                    if t.tick(time.delta_secs()) {
+                        loaded.0 = true;
+                        mission.phase = MissionPhase::GoingToCargo;
+                        dest.0 = mission.cargo_target;
+                        state.0 = RobotState::Moving;
+                        commands.entity(entity).remove::<ActionTimer>();
+
+                        // Libère le storage
+                        zones.release_storage(mission.storage_target);
+                    }
                 }
             }
             MissionPhase::GoingToCargo => {
                 if pos.0 == mission.cargo_target {
-                    // Arrivé au cargo → décharge → nouvelle mission
-                    loaded.0 = false;
+                    mission.phase = MissionPhase::DroppingOff;
+                    state.0 = RobotState::Unloading;
+                    commands.entity(entity).insert(ActionTimer::new(DROPOFF_DURATION));
+                }
+            }
+            MissionPhase::DroppingOff => {
+                if let Some(mut t) = timer {
+                    if t.tick(time.delta_secs()) {
+                        loaded.0 = false;
+                        commands.entity(entity).remove::<ActionTimer>();
 
-                    // Assigne nouvelle mission
-                    let new_storage = zones.next_storage();
-                    let new_cargo = zones.next_cargo();
+                        // Libère le cargo actuel
+                        zones.release_cargo(mission.cargo_target);
 
-                    mission.storage_target = new_storage;
-                    mission.cargo_target = new_cargo;
-                    mission.phase = MissionPhase::GoingToStorage;
-                    dest.0 = new_storage;
-                    state.0 = RobotState::Moving;
+                        // Réserve nouvelle mission
+                        let new_storage = zones.reserve_storage();
+                        let new_cargo = zones.reserve_cargo();
+
+                        match (new_storage, new_cargo) {
+                            (Some(storage), Some(cargo)) => {
+                                mission.storage_target = storage;
+                                mission.cargo_target = cargo;
+                                mission.phase = MissionPhase::GoingToStorage;
+                                dest.0 = storage;
+                                state.0 = RobotState::Moving;
+                            }
+                            (Some(storage), None) => {
+                                // Pas de cargo dispo, libère storage et attend
+                                zones.release_storage(storage);
+                                state.0 = RobotState::Idle;
+                            }
+                            (None, Some(cargo)) => {
+                                // Pas de storage dispo, libère cargo et attend
+                                zones.release_cargo(cargo);
+                                state.0 = RobotState::Idle;
+                            }
+                            (None, None) => {
+                                // Rien de dispo, attend
+                                state.0 = RobotState::Idle;
+                            }
+                        }
+                    }
                 }
             }
         }

@@ -1,6 +1,6 @@
-use bevy::prelude::*;
 use super::{Direction, GridPos};
 use crate::constants::{GRID_HEIGHT, GRID_WIDTH, SPAWN_ZONE_WIDTH};
+use bevy::prelude::*;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ZoneType {
@@ -40,7 +40,12 @@ impl HighwayGraph {
     /// Toutes directions autorisées pour l'instant (on ajoutera les contraintes plus tard)
     #[inline]
     pub fn allowed_directions(&self, _pos: GridPos) -> &'static [Direction] {
-        &[Direction::North, Direction::South, Direction::East, Direction::West]
+        &[
+            Direction::North,
+            Direction::South,
+            Direction::East,
+            Direction::West,
+        ]
     }
 
     #[inline]

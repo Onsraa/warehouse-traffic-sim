@@ -44,11 +44,7 @@ pub fn draw_robot_paths(
             let (fx, fz) = grid.grid_to_world(from_pos);
             let (tx, tz) = grid.grid_to_world(to_pos);
 
-            gizmos.line(
-                Vec3::new(fx, 0.3, fz),
-                Vec3::new(tx, 0.3, tz),
-                color,
-            );
+            gizmos.line(Vec3::new(fx, 0.3, fz), Vec3::new(tx, 0.3, tz), color);
         }
     }
 }
